@@ -61,7 +61,7 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32): int
 
 def decompress (fin: FileStream, fout: FileStream): int
 	var
-		result = Decoder.Result.NEEDS_MORE_INPUT
+		result = Decoder.Result.SUCCESS
 		decoder = new Decoder ()
 		break_loop = false
 	if decoder == null
@@ -73,16 +73,32 @@ def decompress (fin: FileStream, fout: FileStream): int
 	next_out: uint8* = output_buffer
 	while true
 		case result
-			when Decoder.Result.SUCCESS do break_loop = true
-			when Decoder.Result.NEEDS_MORE_INPUT
-				if fin.eof ()
-					return 2
+			when Decoder.Result.SUCCESS
+				if fin.eof () do break_loop = true
 				else
 					available_in = fin.read (input_buffer)
-					next_in = input_buffer
-					if fin.error () != 0
-						stderr.printf ("Failed to read input: %m\n")
-						return 1
+					if fin.eof () and available_in == 0 do break_loop = true
+					else if available_in > 6 and Memory.cmp (input_buffer, "BroTL", 5) == 0 and input_buffer[5] == 0
+						var userdata_size = input_buffer[6]
+						if userdata_size + 7 < available_in
+							available_in -= userdata_size + 7
+							next_in = input_buffer + userdata_size + 7
+						else if userdata_size + 7 == available_in or fin.seek ((long)(userdata_size + 7 - available_in), FileSeek.CUR) == 0
+							available_in = fin.read (input_buffer)
+							next_in = input_buffer
+						else
+							if fin.eof () do return 2
+							stderr.printf ("Failed to read input: %m\n")
+							return 1
+					else
+						next_in = input_buffer
+			when Decoder.Result.NEEDS_MORE_INPUT
+				if fin.eof () do return 2
+				available_in = fin.read (input_buffer)
+				next_in = input_buffer
+				if fin.error () != 0
+					stderr.printf ("Failed to read input: %m\n")
+					return 1
 			when Decoder.Result.NEEDS_MORE_OUTPUT
 				if fout.write (output_buffer) == 0 do break_loop = true
 				else
@@ -113,6 +129,8 @@ def on_interrupt (signum: int)
 	fout = null
 	if output_file != null do FileUtils.remove (output_file)
 	Process.exit (1)
+
+const signature: uint8[] = {'B', 'r', 'o', 'T', 'L', 0, 0}
 
 def main (args: array of string): int
 	Intl.setlocale ()
@@ -155,6 +173,9 @@ def main (args: array of string): int
 	if from_stdin
 		fin = FileStream.fdopen (0, "rb")
 		fout = FileStream.fdopen (1, "wb")
+		if not decompressing do if fout.write (signature) == 0
+			stderr.printf ("Failed to write output: %m\n")
+			return 1
 		retval = 1
 		case decompressing ? decompress (fin, fout) : compress (fin, fout, quality)
 			when 0 do retval = 0
@@ -163,6 +184,9 @@ def main (args: array of string): int
 	if to_stdout
 		keep = true
 		fout = FileStream.fdopen (1, "wb")
+		if not decompressing do if fout.write (signature) == 0
+			stderr.printf ("Failed to write output: %m\n")
+			return 1
 	else do fout = null
 	opts_end = false
 	st: Posix.Stat
@@ -233,8 +257,15 @@ def main (args: array of string): int
 			fout = FileStream.open (output_file, force ? "wb" : "wbx")
 			if fout == null
 				stderr.printf ("%s: %s.br: %m\n", args[0], args[i])
-				retval = 1
 				fin = null
+				retval = 1
+				continue
+			if fout.write (signature) == 0
+				stderr.printf ("Failed to write output: %m\n")
+				fin = null
+				fout = null
+				FileUtils.remove (output_file)
+				retval = 1
 				continue
 		var error = compress (fin, fout, quality)
 		if not to_stdout
