@@ -102,6 +102,8 @@ def decompress (fin: FileStream, fout: FileStream): int
 		return 1
 	return 0
 
+def extern g_lstat (filename: string, out buf: Posix.Stat): int
+
 def main (args: array of string): int
 	Intl.setlocale ()
 	var
@@ -154,9 +156,18 @@ def main (args: array of string): int
 		fout = FileStream.fdopen (1, "wb")
 	else do fout = null
 	opts_end = false
+	st: Posix.Stat
 	for var i = 1 to (args.length - 1) do if args[i][0] == '-' and not opts_end
 		if args[i] == "--" do opts_end = true
 	else if decompressing
+		if g_lstat (args[i], out st) < 0
+			stderr.printf ("%s: %s: %m\n", args[0], args[i])
+			retval = 1
+			continue
+		if not Posix.S_ISREG (st.st_mode)
+			stderr.printf ("%s: %s: Not a regular file, skipping\n", args[0], args[i])
+			if retval != 1 do retval = 2
+			continue
 		fin = FileStream.open (args[i], "rb")
 		if fin == null
 			stderr.printf ("%s: %s: %m\n", args[0], args[i])
@@ -175,11 +186,30 @@ def main (args: array of string): int
 				fin = null
 				continue
 		var error = decompress (fin, fout)
+		if not to_stdout
+			fin = null
+			fout = null
+			var times = UTimBuf ()
+			times.actime = st.st_atime
+			times.modtime = st.st_mtime
+			if FileUtils.chmod (output_file, (int)st.st_mode) < 0 or FileUtils.utime (output_file, times) < 0
+				stderr.printf ("%s: %s: %m\n", args[0], output_file)
+				FileUtils.remove (output_file)
+				retval = 1
+				continue
 		case error
 			when 0 do if not keep do FileUtils.remove (args[i])
 			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], args[i])
 		if error != 0 do FileUtils.remove (output_file)
 	else
+		if g_lstat (args[i], out st) < 0
+			stderr.printf ("%s: %s: %m\n", args[0], args[i])
+			retval = 1
+			continue
+		if not Posix.S_ISREG (st.st_mode)
+			stderr.printf ("%s: %s: Not a regular file, skipping\n", args[0], args[i])
+			if retval != 1 do retval = 2
+			continue
 		fin = FileStream.open (args[i], "rb")
 		if fin == null
 			stderr.printf ("%s: %s: %m\n", args[0], args[i])
@@ -194,6 +224,17 @@ def main (args: array of string): int
 				fin = null
 				continue
 		var error = compress (fin, fout, quality)
+		if not to_stdout
+			fin = null
+			fout = null
+			var times = UTimBuf ()
+			times.actime = st.st_atime
+			times.modtime = st.st_mtime
+			if FileUtils.chmod (output_file, (int)st.st_mode) < 0 or FileUtils.utime (output_file, times) < 0
+				stderr.printf ("%s: %s: %m\n", args[0], output_file)
+				FileUtils.remove (output_file)
+				retval = 1
+				continue
 		case error
 			when 0 do if not keep do FileUtils.remove (args[i])
 		if error != 0 do FileUtils.remove (output_file)
