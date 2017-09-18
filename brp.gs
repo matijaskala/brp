@@ -104,6 +104,16 @@ def decompress (fin: FileStream, fout: FileStream): int
 
 def extern g_lstat (filename: string, out buf: Posix.Stat): int
 
+fin: FileStream
+fout: FileStream
+output_file: string
+
+def on_interrupt (signum: int)
+	fin = null
+	fout = null
+	if output_file != null do FileUtils.remove (output_file)
+	Process.exit (1)
+
 def main (args: array of string): int
 	Intl.setlocale ()
 	var
@@ -142,7 +152,6 @@ def main (args: array of string): int
 		if retval == 1 do return 1
 	else do from_stdin = false
 	quality %= Encoder.MAX_QUALITY - Encoder.MIN_QUALITY + 1
-	fin, fout: FileStream
 	if from_stdin
 		fin = FileStream.fdopen (0, "rb")
 		fout = FileStream.fdopen (1, "wb")
@@ -157,6 +166,8 @@ def main (args: array of string): int
 	else do fout = null
 	opts_end = false
 	st: Posix.Stat
+	Process.signal (ProcessSignal.INT, on_interrupt)
+	Process.signal (ProcessSignal.TERM, on_interrupt)
 	for var i = 1 to (args.length - 1) do if args[i][0] == '-' and not opts_end
 		if args[i] == "--" do opts_end = true
 	else if decompressing
@@ -177,8 +188,8 @@ def main (args: array of string): int
 			stderr.printf ("%s: %s: %s\n", args[0], args[i], "Filename has an unknown suffix, skipping")
 			if retval != 1 do retval = 2
 			continue
-		var output_file = args[i].substring (0, args[i].length - 3)
 		if not to_stdout
+			output_file = args[i].substring (0, args[i].length - 3)
 			fout = FileStream.open (output_file, force ? "wb" : "wbx")
 			if fout == null
 				stderr.printf ("%s: %s: %m\n", args[0], output_file)
@@ -195,8 +206,10 @@ def main (args: array of string): int
 			if FileUtils.chmod (output_file, (int)st.st_mode) < 0 or FileUtils.utime (output_file, times) < 0
 				stderr.printf ("%s: %s: %m\n", args[0], output_file)
 				FileUtils.remove (output_file)
+				output_file = null
 				retval = 1
 				continue
+			output_file = null
 		case error
 			when 0 do if not keep do FileUtils.remove (args[i])
 			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], args[i])
@@ -215,8 +228,8 @@ def main (args: array of string): int
 			stderr.printf ("%s: %s: %m\n", args[0], args[i])
 			retval = 1
 			continue
-		var output_file = args[i] + ".br"
 		if not to_stdout
+			output_file = args[i] + ".br"
 			fout = FileStream.open (output_file, force ? "wb" : "wbx")
 			if fout == null
 				stderr.printf ("%s: %s.br: %m\n", args[0], args[i])
@@ -233,8 +246,10 @@ def main (args: array of string): int
 			if FileUtils.chmod (output_file, (int)st.st_mode) < 0 or FileUtils.utime (output_file, times) < 0
 				stderr.printf ("%s: %s: %m\n", args[0], output_file)
 				FileUtils.remove (output_file)
+				output_file = null
 				retval = 1
 				continue
+			output_file = null
 		case error
 			when 0 do if not keep do FileUtils.remove (args[i])
 		if error != 0 do FileUtils.remove (output_file)
