@@ -28,13 +28,24 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32): int
 		is_eof = false
 		compress_failed = true
 		encoder = new Encoder ()
+	datalen: size_t = 0
+	offset: size_t = 0
+	check_type: short = 3
 	available_in: size_t = 0
 	available_out: size_t = output_buffer.length
 	next_in: uint8* = null
 	next_out: uint8* = output_buffer
+	xxh32state: XXH32.State = null
+	xxh64state: XXH64.State = null
 	if encoder != null
+		case check_type
+			when 3
+				xxh64state = new XXH64.State ()
+				xxh64state.reset ()
 		compress_failed = false
 		encoder.setParameter (Encoder.Parameter.QUALITY, quality)
+		fout.putc (((0x34cb00 >> ((check_type ^ (check_type >> 4)) & 0xf)) & 0x80) | check_type)
+		offset++
 		do
 			if available_in == 0 and not is_eof
 				available_in = fin.read (input_buffer)
@@ -43,6 +54,9 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32): int
 					stderr.printf ("Failed to read input: %m\n")
 					return 1
 				is_eof = fin.eof ()
+				datalen += available_in
+				case check_type
+					when 3 do xxh64state.update (next_in, available_in)
 			if not encoder.compressStream (is_eof ? Encoder.Operation.FINISH : Encoder.Operation.PROCESS, ref available_in, ref next_in, ref available_out, ref next_out, null)
 				compress_failed = true
 				break
@@ -54,10 +68,29 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32): int
 					return 1
 				available_out = output_buffer.length
 				next_out = output_buffer
+				offset += output.length
 		while not encoder.isFinished ()
 	if compress_failed
 		stderr.printf ("Failed to compress data\n")
 		return 1
+	case check_type
+		when 0,1,2,3
+			var xxhsum = check_type == 3 ? xxh64state.digest () : xxh32state.digest ()
+			for var i = 0 to ((1 << check_type) - 1)
+				fout.putc ((int8)xxhsum)
+				xxhsum >>= 8
+				offset++
+	if offset < 0 or datalen < 0
+		fout.putc (0x27)
+		return 0
+	fout.putc (077)
+	fout.putc ((int8)offset | 0x80)
+	while (offset >>= 7) > 0x7f do fout.putc ((int8)offset & 0x7f)
+	fout.putc ((int8)offset | 0x80)
+	fout.putc ((int8)datalen | 0x80)
+	while (datalen >>= 7) > 0x7f do fout.putc ((int8)datalen & 0x7f)
+	fout.putc ((int8)datalen | 0x80)
+	fout.putc (077)
 	return 0
 
 [CCode (cname = "BRP_decompress")]
@@ -118,21 +151,22 @@ def decompress (fin: FileStream, fout: FileStream): int
 								available_out = output_buffer.length
 								next_out = output_buffer
 							case check_type
-								when 0,1,2,3 do for var i = 0 to ((1 << check_type) - 1)
+								when 0,1,2,3
 									var xxhsum = check_type == 3 ? xxh64state.digest () : xxh32state.digest ()
-									if ((xxhsum >> (i * 8)) & 0xff) != next_in[0]
-										stderr.printf ("Invalid checksum!\n")
-										return 1
-									offset++
-									available_in--
-									next_in++
-									if available_in == 0
-										available_in = fin.read (input_buffer)
-										next_in = input_buffer
-										if fin.eof () do return 2
-										if fin.error () != 0
-											stderr.printf ("Failed to read input: %m\n")
+									for var i = 0 to ((1 << check_type) - 1)
+										if ((xxhsum >> (i * 8)) & 0xff) != next_in[0]
+											stderr.printf ("Invalid checksum!\n")
 											return 1
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
 								when 4,5,6 do for var i = 0 to ((1 << (check_type - 4)) - 1)
 									if ((crc32sum >> (i * 8)) & 0xff) != next_in[0]
 										stderr.printf ("Invalid checksum!\n")
@@ -400,7 +434,7 @@ def on_interrupt (signum: int)
 	if output_file != null do FileUtils.remove (output_file)
 	Process.exit (1)
 
-const signature: uint8[] = {'B', 'r', 'o', 'T', 'L', 0, 0}
+const signature: uint8[] = {'\xce', '\xb2', '\xcf', '\x81'}
 
 def main (args: array of string): int
 	Intl.setlocale ()
