@@ -22,6 +22,23 @@ uses Brotli
 input_buffer: uint8[0x10000]
 output_buffer: uint8[0x10000]
 
+def private calculate_checksums (buffer: uint8*, len: size_t, ref xxh32: XXH32.State?, ref xxh64: XXH64.State?, ref crc32: uint32): bool
+	if xxh32 == null and xxh64 == null and crc32 == 0
+		xxh32 = new XXH32.State ()
+		xxh64 = new XXH64.State ()
+		xxh32.reset ()
+		xxh64.reset ()
+		crc32 = crc32c (0, null, 0)
+		buffer += 4
+		len -= 4
+	else if xxh32 == null or xxh64 == null
+		stderr.printf ("Internal error!\n")
+		return false
+	xxh32.update (buffer, len)
+	xxh64.update (buffer, len)
+	crc32 = crc32c (crc32, buffer, len)
+	return true
+
 [CCode (cname = "BRP_compress")]
 def compress (fin: FileStream, fout: FileStream, quality: uint32): int
 	var
@@ -114,6 +131,9 @@ def decompress (fin: FileStream, fout: FileStream): int
 	xxh64state: XXH64.State = null
 	checksum: Checksum = null
 	crc32sum: uint32 = 0
+	xxh32full: XXH32.State = null
+	xxh64full: XXH64.State = null
+	crc32full: uint32 = 0
 	while true
 		case result
 			when Decoder.Result.SUCCESS
@@ -128,6 +148,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 						continue
 					else if brv3
 						if available_in == 0
+							calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 							available_in = fin.read (input_buffer)
 							next_in = input_buffer
 							if fin.eof () do return 2
@@ -161,6 +182,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 										available_in--
 										next_in++
 										if available_in == 0
+											calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 											available_in = fin.read (input_buffer)
 											next_in = input_buffer
 											if fin.eof () do return 2
@@ -175,6 +197,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									available_in--
 									next_in++
 									if available_in == 0
+										calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 										available_in = fin.read (input_buffer)
 										next_in = input_buffer
 										if fin.eof () do return 2
@@ -193,6 +216,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									if available_in < 32
 										Memory.copy (buffer2, next_in, available_in)
 										var available_in_prev = (int)available_in
+										calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 										available_in = fin.read (input_buffer)
 										if fin.eof () do return 2
 										if fin.error () != 0
@@ -210,6 +234,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									available_in -= 32
 									next_in += 32
 									if available_in == 0
+										calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 										available_in = fin.read (input_buffer)
 										next_in = input_buffer
 										if fin.eof () do return 2
@@ -222,8 +247,9 @@ def decompress (fin: FileStream, fout: FileStream): int
 						if (((0x34cb00 >> ((mask ^ (mask >> 4)) & 0xf)) ^ next_in[0]) & 0x80) != 0
 							stderr.printf ("Wrong parity\n")
 							return 1
-						if (mask & 047) == 047
-							if (mask & 030) != 0
+						if (mask & 0x60) == 0x20
+							calculate_checksums (input_buffer, next_in - (uint8*)input_buffer, ref xxh32full, ref xxh64full, ref crc32full)
+							if (mask & 030) != 0 or (mask & 7) != 7
 								if (mask & 020) != 0
 									available_in--
 									next_in++
@@ -237,7 +263,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									if (next_in[0] & 0x80) == 0
 										stderr.printf ("Corrupt trailer\n")
 										return 1
-									var num = next_in[0] & 0x7f
+									num: uint64 = next_in[0] & 0x7f
 									for var i = 1 to 5
 										available_in--
 										next_in++
@@ -269,7 +295,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									if (next_in[0] & 0x80) == 0
 										stderr.printf ("Corrupt trailer\n")
 										return 1
-									var num = next_in[0] & 0x7f
+									num: uint64 = next_in[0] & 0x7f
 									for var i = 1 to 5
 										available_in--
 										next_in++
@@ -288,6 +314,37 @@ def decompress (fin: FileStream, fout: FileStream): int
 									if num != datalen
 										stderr.printf ("Incorrect data length\n")
 										return 1
+								case mask & 7
+									when 0,1,2,3
+										var xxhfull = check_type == 3 ? xxh64full.digest () : xxh32full.digest ()
+										for var i = 0 to ((1 << check_type) - 1)
+											if ((xxhfull >> (i * 8)) & 0xff) != next_in[0]
+												stderr.printf ("Invalid checksum!\n")
+												return 1
+											offset++
+											available_in--
+											next_in++
+											if available_in == 0
+												available_in = fin.read (input_buffer)
+												next_in = input_buffer
+												if fin.eof () do return 2
+												if fin.error () != 0
+													stderr.printf ("Failed to read input: %m\n")
+													return 1
+									when 4,5,6 do for var i = 0 to ((1 << (check_type - 4)) - 1)
+										if ((crc32full >> (i * 8)) & 0xff) != next_in[0]
+											stderr.printf ("Invalid checksum!\n")
+											return 1
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
 								available_in--
 								next_in++
 								if available_in == 0
@@ -315,6 +372,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 							available_in--
 							next_in++
 							if available_in == 0
+								calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 								available_in = fin.read (input_buffer)
 								next_in = input_buffer
 								if fin.eof () do return 2
@@ -343,6 +401,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									available_in--
 									next_in++
 									if available_in == 0
+										calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 										available_in = fin.read (input_buffer)
 										next_in = input_buffer
 										if fin.eof () do return 2
@@ -358,6 +417,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 								available_in--
 								next_in++
 								if available_in == 0
+									calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 									available_in = fin.read (input_buffer)
 									next_in = input_buffer
 									if fin.eof () do return 2
@@ -374,6 +434,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 							available_in -= userdata_size + 7
 							next_in = input_buffer + userdata_size + 7
 						else if userdata_size + 7 == available_in or fin.seek ((long)(userdata_size + 7 - available_in), FileSeek.CUR) == 0
+							calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 							available_in = fin.read (input_buffer)
 							next_in = input_buffer
 						else
@@ -384,6 +445,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 						next_in = input_buffer
 			when Decoder.Result.NEEDS_MORE_INPUT
 				if fin.eof () do return 2
+				calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 				available_in = fin.read (input_buffer)
 				next_in = input_buffer
 				if fin.error () != 0
@@ -512,7 +574,8 @@ def main (args: array of string): int
 			stderr.printf ("%s: %s: %m\n", args[0], args[i])
 			retval = 1
 			continue
-		if not to_stdout and args[i].substring (-3) != ".br"
+		var inputnamelen = args[i].length
+		if not to_stdout and (args[i][inputnamelen-3] != '.' or args[i][inputnamelen-2] != 'b' or args[i][inputnamelen-1] != 'r')
 			stderr.printf ("%s: %s: %s\n", args[0], args[i], "Filename has an unknown suffix, skipping")
 			if retval != 1 do retval = 2
 			continue
@@ -537,11 +600,11 @@ def main (args: array of string): int
 				output_file = null
 				retval = 1
 				continue
+			if error != 0 do FileUtils.remove (output_file)
 			output_file = null
 		case error
 			when 0 do if not keep do FileUtils.remove (args[i])
 			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], args[i])
-		if error != 0 do FileUtils.remove (output_file)
 	else
 		if g_lstat (args[i], out st) < 0
 			stderr.printf ("%s: %s: %m\n", args[0], args[i])
@@ -584,8 +647,8 @@ def main (args: array of string): int
 				output_file = null
 				retval = 1
 				continue
+			if error != 0 do FileUtils.remove (output_file)
 			output_file = null
 		case error
 			when 0 do if not keep do FileUtils.remove (args[i])
-		if error != 0 do FileUtils.remove (output_file)
 	return retval
