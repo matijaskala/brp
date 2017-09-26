@@ -23,17 +23,6 @@ input_buffer: uint8[0x10000]
 output_buffer: uint8[0x10000]
 
 def private calculate_checksums (buffer: uint8*, len: size_t, ref xxh32: XXH32.State?, ref xxh64: XXH64.State?, ref crc32: uint32): bool
-	if xxh32 == null and xxh64 == null and crc32 == 0
-		xxh32 = new XXH32.State ()
-		xxh64 = new XXH64.State ()
-		xxh32.reset ()
-		xxh64.reset ()
-		crc32 = crc32c (0, null, 0)
-		buffer += 4
-		len -= 4
-	else if xxh32 == null or xxh64 == null
-		stderr.printf ("Internal error!\n")
-		return false
 	xxh32.update (buffer, len)
 	xxh64.update (buffer, len)
 	crc32 = crc32c (crc32, buffer, len)
@@ -115,13 +104,18 @@ def decompress (fin: FileStream, fout: FileStream): int
 	var
 		result = Decoder.Result.SUCCESS
 		decoder = new Decoder ()
+		hasdatalen = false
 		break_loop = false
 		brv3 = false
+		xxh32full = new XXH32.State ()
+		xxh64full = new XXH64.State ()
+		crc32full = crc32c (0, null, 0)
 	if decoder == null
 		stderr.printf ("Failed to decompress data\n")
 		return 1
 	datalen: size_t = 0
-	offset: size_t = 0
+	offset: size_t = -1
+	prev_datalen: size_t = 0
 	check_type: short = -1
 	available_in: size_t = 0
 	available_out: size_t = output_buffer.length
@@ -131,9 +125,8 @@ def decompress (fin: FileStream, fout: FileStream): int
 	xxh64state: XXH64.State = null
 	checksum: Checksum = null
 	crc32sum: uint32 = 0
-	xxh32full: XXH32.State = null
-	xxh64full: XXH64.State = null
-	crc32full: uint32 = 0
+	xxh32full.reset ()
+	xxh64full.reset ()
 	while true
 		case result
 			when Decoder.Result.SUCCESS
@@ -148,7 +141,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 						continue
 					else if brv3
 						if available_in == 0
-							calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 							available_in = fin.read (input_buffer)
 							next_in = input_buffer
 							if fin.eof () do return 2
@@ -171,39 +163,81 @@ def decompress (fin: FileStream, fout: FileStream): int
 										checksum.update (output, output.length)
 								available_out = output_buffer.length
 								next_out = output_buffer
-							case check_type
-								when 0,1,2,3
-									var xxhsum = check_type == 3 ? xxh64state.digest () : xxh32state.digest ()
-									for var i = 0 to ((1 << check_type) - 1)
-										if ((xxhsum >> (i * 8)) & 0xff) != next_in[0]
-											stderr.printf ("Invalid checksum!\n")
-											return 1
-										offset++
-										available_in--
-										next_in++
-										if available_in == 0
-											calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
-											available_in = fin.read (input_buffer)
-											next_in = input_buffer
-											if fin.eof () do return 2
-											if fin.error () != 0
-												stderr.printf ("Failed to read input: %m\n")
-												return 1
-								when 4,5,6 do for var i = 0 to ((1 << (check_type - 4)) - 1)
-									if ((crc32sum >> (i * 8)) & 0xff) != next_in[0]
-										stderr.printf ("Invalid checksum!\n")
+							if hasdatalen
+								offset++
+								available_in--
+								next_in++
+								if available_in == 0
+									available_in = fin.read (input_buffer)
+									next_in = input_buffer
+									if fin.eof () do return 2
+									if fin.error () != 0
+										stderr.printf ("Failed to read input: %m\n")
 										return 1
+								if (next_in[0] & 0x80) != 0
+									stderr.printf ("Corrupt input\n")
+									return 1
+								num: uint64 = next_in[0] & 0x7f
+								for var i = 1 to 5
 									offset++
 									available_in--
 									next_in++
 									if available_in == 0
-										calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 										available_in = fin.read (input_buffer)
 										next_in = input_buffer
 										if fin.eof () do return 2
 										if fin.error () != 0
 											stderr.printf ("Failed to read input: %m\n")
 											return 1
+									if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+										stderr.printf ("Corrupt input\n")
+										return 1
+									num |= (next_in[0] & 0x7f) << (7*i)
+									if (next_in[0] & 0x80) != 0 do break
+								if num != datalen - prev_datalen
+									stderr.printf ("Incorrect data length\n")
+									return 1
+							case check_type
+								when 0,1,2,3
+									var digest = new array of uint8[1 << check_type]
+									var xxhsum = check_type == 3 ? xxh64state.digest () : xxh32state.digest ()
+									for var i = 0 to (digest.length - 1)
+										digest[i] = (uint8)(xxhsum >> (i * 8))
+										if digest[i] != next_in[0]
+											stderr.printf ("Invalid checksum!\n")
+											return 1
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
+									calculate_checksums (digest, digest.length, ref xxh32full, ref xxh64full, ref crc32full)
+									xxh32state = null
+									xxh64state = null
+								when 4,5,6
+									var digest = new array of uint8[1 << (check_type - 4)]
+									for var i = 0 to (digest.length - 1)
+										digest[i] = (uint8)(crc32sum >> (i * 8))
+										if digest[i] != next_in[0]
+											stderr.printf ("Invalid checksum!\n")
+											return 1
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
+									calculate_checksums (digest, digest.length, ref xxh32full, ref xxh64full, ref crc32full)
+									crc32sum = 0
 								when 7
 									if checksum == null
 										stderr.printf ("Internal error!\n")
@@ -213,10 +247,10 @@ def decompress (fin: FileStream, fout: FileStream): int
 										buffer2 = new array of uint8[32]
 									l: size_t = 32
 									checksum.get_digest (buffer1, ref l)
+									calculate_checksums (buffer1, l, ref xxh32full, ref xxh64full, ref crc32full)
 									if available_in < 32
 										Memory.copy (buffer2, next_in, available_in)
 										var available_in_prev = (int)available_in
-										calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 										available_in = fin.read (input_buffer)
 										if fin.eof () do return 2
 										if fin.error () != 0
@@ -234,7 +268,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 									available_in -= 32
 									next_in += 32
 									if available_in == 0
-										calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 										available_in = fin.read (input_buffer)
 										next_in = input_buffer
 										if fin.eof () do return 2
@@ -248,7 +281,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 							stderr.printf ("Wrong parity\n")
 							return 1
 						if (mask & 0x60) == 0x20
-							calculate_checksums (input_buffer, next_in - (uint8*)input_buffer, ref xxh32full, ref xxh64full, ref crc32full)
 							if (mask & 030) != 0 or (mask & 7) != 7
 								if (mask & 020) != 0
 									available_in--
@@ -314,37 +346,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 									if num != datalen
 										stderr.printf ("Incorrect data length\n")
 										return 1
-								case mask & 7
-									when 0,1,2,3
-										var xxhfull = check_type == 3 ? xxh64full.digest () : xxh32full.digest ()
-										for var i = 0 to ((1 << check_type) - 1)
-											if ((xxhfull >> (i * 8)) & 0xff) != next_in[0]
-												stderr.printf ("Invalid checksum!\n")
-												return 1
-											offset++
-											available_in--
-											next_in++
-											if available_in == 0
-												available_in = fin.read (input_buffer)
-												next_in = input_buffer
-												if fin.eof () do return 2
-												if fin.error () != 0
-													stderr.printf ("Failed to read input: %m\n")
-													return 1
-									when 4,5,6 do for var i = 0 to ((1 << (check_type - 4)) - 1)
-										if ((crc32full >> (i * 8)) & 0xff) != next_in[0]
-											stderr.printf ("Invalid checksum!\n")
-											return 1
-										offset++
-										available_in--
-										next_in++
-										if available_in == 0
-											available_in = fin.read (input_buffer)
-											next_in = input_buffer
-											if fin.eof () do return 2
-											if fin.error () != 0
-												stderr.printf ("Failed to read input: %m\n")
-												return 1
 								available_in--
 								next_in++
 								if available_in == 0
@@ -354,6 +355,35 @@ def decompress (fin: FileStream, fout: FileStream): int
 									if fin.error () != 0
 										stderr.printf ("Failed to read input: %m\n")
 										return 1
+								case mask & 7
+									when 0,1,2,3
+										var xxhfull = (mask & 7) == 3 ? xxh64full.digest () : xxh32full.digest ()
+										for var i = 0 to ((1 << (mask & 7)) - 1)
+											if ((xxhfull >> (i * 8)) & 0xff) != next_in[0]
+												stderr.printf ("Invalid checksum!\n")
+												return 1
+											available_in--
+											next_in++
+											if available_in == 0
+												available_in = fin.read (input_buffer)
+												next_in = input_buffer
+												if fin.eof () do return 2
+												if fin.error () != 0
+													stderr.printf ("Failed to read input: %m\n")
+													return 1
+									when 4,5,6 do for var i = 0 to ((1 << ((mask & 7) - 4)) - 1)
+										if ((crc32full >> (i * 8)) & 0xff) != next_in[0]
+											stderr.printf ("Invalid checksum!\n")
+											return 1
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
 								if (next_in[0] & 0x7f) != mask
 									stderr.printf ("Corrupt trailer\n")
 									return 1
@@ -364,20 +394,42 @@ def decompress (fin: FileStream, fout: FileStream): int
 						else if (mask & 040) != 0
 							stderr.printf ("Corrupt trailer\n")
 							return 1
-						else if (mask & 030) != 0
+						else if (mask & 020) != 0 and ~offset == 0
 							stderr.printf ("Corrupt input\n")
 							return 1
 						else
+							var cur_offset = offset
 							offset++
 							available_in--
 							next_in++
 							if available_in == 0
-								calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 								available_in = fin.read (input_buffer)
 								next_in = input_buffer
 								if fin.eof () do return 2
 								if fin.error () != 0
 									stderr.printf ("Failed to read input: %m\n")
+									return 1
+							hasdatalen = (mask & 8) == 8
+							if (mask & 0x10) == 0x10
+								num: uint64 = 0
+								for var i = 0 to 5
+									num |= (next_in[0] & 0x7f) << (7*i)
+									offset++
+									available_in--
+									next_in++
+									if available_in == 0
+										available_in = fin.read (input_buffer)
+										next_in = input_buffer
+										if fin.eof () do return 2
+										if fin.error () != 0
+											stderr.printf ("Failed to read input: %m\n")
+											return 1
+									if (next_in[-1] & 0x80) != 0 do break
+									if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+										stderr.printf ("Corrupt header\n")
+										return 1
+								if num != cur_offset
+									stderr.printf ("Incorrect header offset\n")
 									return 1
 							case mask & 7
 								when 0,1,2
@@ -401,7 +453,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 									available_in--
 									next_in++
 									if available_in == 0
-										calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 										available_in = fin.read (input_buffer)
 										next_in = input_buffer
 										if fin.eof () do return 2
@@ -417,7 +468,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 								available_in--
 								next_in++
 								if available_in == 0
-									calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 									available_in = fin.read (input_buffer)
 									next_in = input_buffer
 									if fin.eof () do return 2
@@ -428,13 +478,15 @@ def decompress (fin: FileStream, fout: FileStream): int
 									stderr.printf ("Unsupported field")
 								if (mask & 0x67) != 0
 									stderr.printf ("Unimplemented field")
+							offset -= cur_offset
+							prev_datalen = datalen
+							decoder = new Decoder ()
 					else if available_in > 6 and Memory.cmp (input_buffer, "BroTL", 5) == 0 and input_buffer[5] == 0
 						var userdata_size = input_buffer[6]
 						if userdata_size + 7 < available_in
 							available_in -= userdata_size + 7
 							next_in = input_buffer + userdata_size + 7
 						else if userdata_size + 7 == available_in or fin.seek ((long)(userdata_size + 7 - available_in), FileSeek.CUR) == 0
-							calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 							available_in = fin.read (input_buffer)
 							next_in = input_buffer
 						else
@@ -445,7 +497,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 						next_in = input_buffer
 			when Decoder.Result.NEEDS_MORE_INPUT
 				if fin.eof () do return 2
-				calculate_checksums (input_buffer, input_buffer.length, ref xxh32full, ref xxh64full, ref crc32full)
 				available_in = fin.read (input_buffer)
 				next_in = input_buffer
 				if fin.error () != 0
@@ -588,6 +639,7 @@ def main (args: array of string): int
 				fin = null
 				continue
 		var error = decompress (fin, fout)
+		if error != 0 do retval = 1
 		if not to_stdout
 			fin = null
 			fout = null
@@ -635,6 +687,7 @@ def main (args: array of string): int
 				retval = 1
 				continue
 		var error = compress (fin, fout, quality)
+		if error != 0 do retval = 1
 		if not to_stdout
 			fin = null
 			fout = null
