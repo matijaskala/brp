@@ -399,6 +399,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 							return 1
 						else
 							var cur_offset = offset
+							var first_header = ~offset == 0
 							offset++
 							available_in--
 							next_in++
@@ -476,8 +477,33 @@ def decompress (fin: FileStream, fout: FileStream): int
 										return 1
 								if (mask & 0x18) != 0
 									stderr.printf ("Unsupported field")
-								if (mask & 0x67) != 0
+								if (mask & 1) != 0
+									if not first_header
+										stderr.printf ("Corrupt header\n")
+									while (next_in[0] & 0x80) == 0
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
+									offset++
+									available_in--
+									next_in++
+									if available_in == 0
+										available_in = fin.read (input_buffer)
+										next_in = input_buffer
+										if fin.eof () do return 2
+										if fin.error () != 0
+											stderr.printf ("Failed to read input: %m\n")
+											return 1
+								if (mask & 0x66) != 0
 									stderr.printf ("Unimplemented field")
+									return 1
 							offset -= cur_offset
 							prev_datalen = datalen
 							decoder = new Decoder ()
