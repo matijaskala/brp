@@ -1,8 +1,8 @@
 VALAC = valac
 VALAFLAGS = -X -O3 -X -Wl,-O1
 
-brp: brp.gs libbrotlidec.vapi libbrotlienc.vapi xxhash.vapi
+all: brzip.gs libbrotlidec.vapi libbrotlienc.vapi xxhash.vapi
 	$(VALAC) $< --vapidir=. --pkg=libbrotlidec --pkg=libbrotlienc --pkg=xxhash --pkg=posix $(VALAFLAGS) -X -lxxhash -X -lpthread crc32c.c
 
 clean:
-	$(RM) brp
+	$(RM) brzip

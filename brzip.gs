@@ -691,6 +691,17 @@ def on_interrupt (signum: int)
 
 const signature: uint8[] = {'\xce', '\xb2', '\xcf', '\x81'}
 
+def print_usage ()
+	stderr.printf ("Usage: brzip [OPTION]... [FILE]...\nCompress or decompress FILEs in the .br format.\n\n")
+	stderr.printf ("  -c, --stdout      write on standard output, keep original files unchanged\n")
+	stderr.printf ("  -d, --decompress  decompress\n")
+	stderr.printf ("  -f, --force       force overwrite of output file\n")
+	stderr.printf ("  -h, --help        give this help\n")
+	stderr.printf ("  -k, --keep        keep (don't delete) input files\n")
+	stderr.printf ("  -0, --fast        compress faster\n")
+	stderr.printf (" -11, --best        compress better\n")
+	stderr.printf ("\n\nWith no FILE, or when FILE is -, read standard input.\n")
+
 def main (args: array of string): int
 	Intl.setlocale ()
 	var
@@ -702,7 +713,15 @@ def main (args: array of string): int
 		to_stdout = false
 		num = false
 		keep = false
+		need_help = false
 		retval = 0
+	if args[0][0].tolower () == 'b' and args[0][1].tolower () == 'r'
+		if args[0][2].tolower () == 'c' and args[0][3].tolower () == 'a' and args[0][4].tolower () == 't'
+			to_stdout = true
+			decompressing = true
+		if args[0][2].tolower () == 'u' and args[0][3].tolower () == 'n' and args[0][4].tolower () == 'z' \
+						and args[0][5].tolower () == 'i' and args[0][6].tolower () == 'p'
+			decompressing = true
 	for var i = 1 to (args.length - 1) do if args[i][0] == '-' and not opts_end
 		if args[i][1] == '-' do case args[i]
 			when "--" do opts_end = true
@@ -712,8 +731,10 @@ def main (args: array of string): int
 			when "--decompress" do decompressing = true
 			when "--stdout", "--to-stdout" do to_stdout = true
 			when "--keep" do keep = true
+			when "--help" do need_help = true
 			default
-				stderr.printf ("%s: unrecognized option '%s'\n", args[0], args[1])
+				stderr.printf ("%s: unrecognized option '%s'\n\n", args[0], args[1])
+				need_help = true
 				retval = 1
 		else do for j in ((string*)args[i]+1)->data
 			case j
@@ -722,10 +743,18 @@ def main (args: array of string): int
 				when 'd' do decompressing = true
 				when 'f' do force = true
 				when 'k' do keep = true
+				when 'h' do need_help = true
+				default
+					stderr.printf ("%s: unrecognized option '%c'\n\n", args[0], j)
+					need_help = true
+					retval = 1
 			case j
 				when '1', '2', '3', '4', '5', '6', '7', '8', '9', '0' do num = true
 				default do num = false
 		num = false
+		if need_help
+			print_usage ()
+			return retval
 		if retval == 1 do return 1
 	else do from_stdin = false
 	quality %= Encoder.MAX_QUALITY - Encoder.MIN_QUALITY + 1
