@@ -390,6 +390,26 @@ def decompress (fin: FileStream, fout: FileStream): int
 								if (((0x34cb00 >> ((mask ^ (mask >> 4)) & 0xf)) ^ next_in[0]) & 0x80) != 0
 									stderr.printf ("Wrong parity\n")
 									return 1
+							available_in--
+							next_in++
+							if available_in == 0
+								available_in = fin.read (input_buffer)
+								next_in = input_buffer
+								if fin.error () != 0
+									stderr.printf ("Failed to read input: %m\n")
+									return 1
+							while not fin.eof ()
+								if next_in[0] != 0
+									stderr.printf ("Corrupt input: %m\n")
+									return 1
+								available_in--
+								next_in++
+								if available_in == 0
+									available_in = fin.read (input_buffer)
+									next_in = input_buffer
+									if fin.error () != 0
+										stderr.printf ("Failed to read input: %m\n")
+										return 1
 							break_loop = true
 						else if (mask & 040) != 0
 							stderr.printf ("Corrupt trailer\n")
@@ -415,6 +435,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 								num: uint64 = 0
 								for var i = 0 to 5
 									num |= (next_in[0] & 0x7f) << (7*i)
+									var prev = next_in[0]
 									offset++
 									available_in--
 									next_in++
@@ -425,7 +446,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 										if fin.error () != 0
 											stderr.printf ("Failed to read input: %m\n")
 											return 1
-									if (next_in[-1] & 0x80) != 0 do break
+									if (prev & 0x80) != 0 do break
 									if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
 										stderr.printf ("Corrupt header\n")
 										return 1
@@ -477,6 +498,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 										return 1
 								if (mask & 0x18) != 0
 									stderr.printf ("Unsupported field")
+									return 1
 								if (mask & 1) != 0
 									if not first_header
 										stderr.printf ("Corrupt header\n")
@@ -501,7 +523,101 @@ def decompress (fin: FileStream, fout: FileStream): int
 										if fin.error () != 0
 											stderr.printf ("Failed to read input: %m\n")
 											return 1
-								if (mask & 0x66) != 0
+								if (mask & 2) != 0
+									num: uint64 = 0
+									for var i = 0 to 5
+										num |= (next_in[0] & 0x7f) << (7*i)
+										var prev = next_in[0]
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
+										if (prev & 0x80) != 0 do break
+										if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+											stderr.printf ("Corrupt metadata\n")
+											return 1
+									var filename = new array of char[num + 1]
+									filename[num] = 0
+									for var i = 0 to (num - 1)
+										filename[i] = (char)next_in[0]
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
+								if (mask & 4) != 0
+									num: uint64 = 0
+									for var i = 0 to 5
+										num |= (next_in[0] & 0x7f) << (7*i)
+										var prev = next_in[0]
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
+										if (prev & 0x80) != 0 do break
+										if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+											stderr.printf ("Corrupt metadata\n")
+											return 1
+									var extra_field = new array of char[num + 1]
+									extra_field[num] = 0
+									for var i = 0 to (num - 1)
+										extra_field[i] = (char)next_in[0]
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
+								if (mask & 0x40) != 0
+									if (((0x34cb00 >> ((next_in[0] ^ ((next_in[0] & 0x7f) >> 4)) & 0xf)) ^ next_in[0]) & 0x80) != 0
+										stderr.printf ("Wrong parity\n")
+										return 1
+									if (mask & 0x47) != 0
+										stderr.printf ("Unsupported compression")
+										return 1
+									offset++
+									available_in--
+									next_in++
+									if available_in == 0
+										available_in = fin.read (input_buffer)
+										next_in = input_buffer
+										if fin.eof () do return 2
+										if fin.error () != 0
+											stderr.printf ("Failed to read input: %m\n")
+											return 1
+								if (mask & 0x20) != 0
+									for var i = 0 to 1
+										offset++
+										available_in--
+										next_in++
+										if available_in == 0
+											available_in = fin.read (input_buffer)
+											next_in = input_buffer
+											if fin.eof () do return 2
+											if fin.error () != 0
+												stderr.printf ("Failed to read input: %m\n")
+												return 1
 									stderr.printf ("Unimplemented field")
 									return 1
 							offset -= cur_offset
