@@ -1,5 +1,5 @@
 /*
- * Brotli packer
+ * .br compression utility
  * Copyright (C) 2017  Matija Skala <mskala@gmx.com>
  *
  * This program is free software: you can redistribute it and/or modify
@@ -780,7 +780,19 @@ def main (args: array of string): int
 	st: Posix.Stat
 	Process.signal (ProcessSignal.INT, on_interrupt)
 	Process.signal (ProcessSignal.TERM, on_interrupt)
-	for var i = 1 to (args.length - 1) do if args[i][0] == '-' and not opts_end
+	for var i = 1 to (args.length - 1) do if args[i] == "-"
+		fin = FileStream.fdopen (0, "rb")
+		fout = FileStream.fdopen (1, "wb")
+		if not decompressing do if fout.write (signature) == 0
+			stderr.printf ("Failed to write output: %m\n")
+			return 1
+		var error = decompressing ? decompress (fin, fout) : compress (fin, fout, quality)
+		if error != 0 do retval = 1
+		case error
+			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], "(stdin)")
+		fin = null
+		fout = null
+	else if args[i][0] == '-' and not opts_end
 		if args[i] == "--" do opts_end = true
 	else if decompressing
 		if g_lstat (args[i], out st) < 0
