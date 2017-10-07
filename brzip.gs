@@ -25,7 +25,7 @@ output_buffer: uint8[0x10000]
 def private calculate_checksums (buffer: uint8*, len: size_t, ref xxh32: XXH32.State?, ref xxh64: XXH64.State?, ref crc32: uint32): bool
 	xxh32.update (buffer, len)
 	xxh64.update (buffer, len)
-	crc32 = crc32c (crc32, buffer, len)
+	crc32 = ~crc32c (~crc32, buffer, len)
 	return true
 
 [CCode (cname = "BRP_compress")]
@@ -109,7 +109,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 		brv3 = false
 		xxh32full = new XXH32.State ()
 		xxh64full = new XXH64.State ()
-		crc32full = crc32c (0, null, 0)
+		crc32full = ~crc32c (~0, null, 0)
 	if decoder == null
 		stderr.printf ("Failed to decompress data\n")
 		return 1
@@ -155,7 +155,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 								case check_type
 									when 0,1,2 do xxh32state.update (output, output.length)
 									when 3 do xxh64state.update (output, output.length)
-									when 4,5,6 do crc32sum = crc32c (crc32sum, output, output.length)
+									when 4,5,6 do crc32sum = ~crc32c (~crc32sum, output, output.length)
 									when 7
 										if checksum == null
 											stderr.printf ("Internal error!\n")
@@ -464,7 +464,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									xxh64state.reset ()
 								when 4,5,6
 									check_type = mask & 7
-									crc32sum = crc32c (0, null, 0)
+									crc32sum = ~crc32c (~0, null, 0)
 								when 7
 									if next_in[0] != 0
 										stderr.printf ("Unknown check ID\n")
@@ -648,7 +648,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 				case check_type
 					when 0,1,2 do xxh32state.update (output_buffer, output_buffer.length)
 					when 3 do xxh64state.update (output_buffer, output_buffer.length)
-					when 4,5,6 do crc32sum = crc32c (crc32sum, output_buffer, output_buffer.length)
+					when 4,5,6 do crc32sum = ~crc32c (~crc32sum, output_buffer, output_buffer.length)
 					when 7
 						if checksum == null
 							stderr.printf ("Internal error!\n")
@@ -676,8 +676,9 @@ def decompress (fin: FileStream, fout: FileStream): int
 		return 1
 	return 0
 
+[CCode (cname = "crc32c_le")]
+def extern crc32c (crc: uint32, buf: uchar*, len: size_t): uint32
 def extern g_lstat (filename: string, out buf: Posix.Stat): int
-def extern crc32c (crc: uint32, buf: void*, len: size_t): uint32
 
 fin: FileStream
 fout: FileStream
