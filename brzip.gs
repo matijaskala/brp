@@ -723,7 +723,7 @@ def main (args: array of string): int
 		if args[0][2].tolower () == 'u' and args[0][3].tolower () == 'n' and args[0][4].tolower () == 'z' \
 						and args[0][5].tolower () == 'i' and args[0][6].tolower () == 'p'
 			decompressing = true
-	for var i = 1 to (args.length - 1) do if args[i][0] == '-' and not opts_end
+	for var i = 1 to (args.length - 1) do if args[i][0] == '-' and args[i][1] != 0 and not opts_end
 		if args[i][1] == '-' do case args[i]
 			when "--" do opts_end = true
 			when "--best" do quality = Encoder.MAX_QUALITY
