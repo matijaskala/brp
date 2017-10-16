@@ -623,18 +623,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 							offset -= cur_offset
 							prev_datalen = datalen
 							decoder = new Decoder ()
-					else if available_in > 6 and Memory.cmp (input_buffer, "BroTL", 5) == 0 and input_buffer[5] == 0
-						var userdata_size = input_buffer[6]
-						if userdata_size + 7 < available_in
-							available_in -= userdata_size + 7
-							next_in = input_buffer + userdata_size + 7
-						else if userdata_size + 7 == available_in or fin.seek ((long)(userdata_size + 7 - available_in), FileSeek.CUR) == 0
-							available_in = fin.read (input_buffer)
-							next_in = input_buffer
-						else
-							if fin.eof () do return 2
-							stderr.printf ("Failed to read input: %m\n")
-							return 1
 					else
 						next_in = input_buffer
 			when Decoder.Result.NEEDS_MORE_INPUT
