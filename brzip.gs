@@ -693,6 +693,8 @@ def print_usage ()
 
 def main (args: array of string): int
 	Intl.setlocale ()
+	var bstdin = FileStream.fdopen (0, "rb")
+	var bstdout = FileStream.fdopen (1, "wb")
 	var
 		quality = Encoder.DEFAULT_QUALITY
 		opts_end = false
@@ -748,39 +750,31 @@ def main (args: array of string): int
 	else do from_stdin = false
 	quality %= Encoder.MAX_QUALITY - Encoder.MIN_QUALITY + 1
 	if from_stdin
-		fin = FileStream.fdopen (0, "rb")
-		fout = FileStream.fdopen (1, "wb")
-		if not decompressing do if fout.write (signature) == 0
+		if not decompressing do if bstdout.write (signature) == 0
 			stderr.printf ("Failed to write output: %m\n")
 			return 1
 		retval = 1
-		case decompressing ? decompress (fin, fout) : compress (fin, fout, quality)
+		case decompressing ? decompress (bstdin, bstdout) : compress (bstdin, bstdout, quality)
 			when 0 do retval = 0
 			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], "(stdin)")
 		return retval
 	if to_stdout
 		keep = true
-		fout = FileStream.fdopen (1, "wb")
-		if not decompressing do if fout.write (signature) == 0
+		if not decompressing do if bstdout.write (signature) == 0
 			stderr.printf ("Failed to write output: %m\n")
 			return 1
-	else do fout = null
 	opts_end = false
 	st: Posix.Stat
 	Process.signal (ProcessSignal.INT, on_interrupt)
 	Process.signal (ProcessSignal.TERM, on_interrupt)
 	for var i = 1 to (args.length - 1) do if args[i] == "-"
-		fin = FileStream.fdopen (0, "rb")
-		fout = FileStream.fdopen (1, "wb")
-		if not decompressing do if fout.write (signature) == 0
+		if not decompressing do if bstdout.write (signature) == 0
 			stderr.printf ("Failed to write output: %m\n")
 			return 1
-		var error = decompressing ? decompress (fin, fout) : compress (fin, fout, quality)
+		var error = decompressing ? decompress (bstdin, bstdout) : compress (bstdin, bstdout, quality)
 		if error != 0 do retval = 1
 		case error
 			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], "(stdin)")
-		fin = null
-		fout = null
 	else if args[i][0] == '-' and not opts_end
 		if args[i] == "--" do opts_end = true
 	else if decompressing
