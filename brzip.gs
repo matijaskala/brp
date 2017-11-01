@@ -192,7 +192,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
 										stderr.printf ("Corrupt input\n")
 										return 1
-									num |= (next_in[0] & 0x7f) << (7*i)
+									num |= ((uint64)next_in[0] & 0x7f) << (7*i)
 									if (next_in[0] & 0x80) != 0 do break
 								if num != datalen - prev_datalen
 									stderr.printf ("Incorrect data length\n")
@@ -309,7 +309,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 										if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
 											stderr.printf ("Corrupt trailer\n")
 											return 1
-										num |= (next_in[0] & 0x7f) << (7*i)
+										num |= ((uint64)next_in[0] & 0x7f) << (7*i)
 										if (next_in[0] & 0x80) != 0 do break
 									if num != offset
 										stderr.printf ("Incorrect header offset\n")
@@ -341,7 +341,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 										if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
 											stderr.printf ("Corrupt trailer\n")
 											return 1
-										num |= (next_in[0] & 0x7f) << (7*i)
+										num |= ((uint64)next_in[0] & 0x7f) << (7*i)
 										if (next_in[0] & 0x80) != 0 do break
 									if num != datalen
 										stderr.printf ("Incorrect data length\n")
@@ -434,7 +434,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 							if (mask & 0x10) == 0x10
 								num: uint64 = 0
 								for var i = 0 to 5
-									num |= (next_in[0] & 0x7f) << (7*i)
+									num |= ((uint64)next_in[0] & 0x7f) << (7*i)
 									var prev = next_in[0]
 									offset++
 									available_in--
@@ -526,7 +526,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 								if (mask & 2) != 0
 									num: uint64 = 0
 									for var i = 0 to 5
-										num |= (next_in[0] & 0x7f) << (7*i)
+										num |= ((uint64)next_in[0] & 0x7f) << (7*i)
 										var prev = next_in[0]
 										offset++
 										available_in--
@@ -559,7 +559,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 								if (mask & 4) != 0
 									num: uint64 = 0
 									for var i = 0 to 5
-										num |= (next_in[0] & 0x7f) << (7*i)
+										num |= ((uint64)next_in[0] & 0x7f) << (7*i)
 										var prev = next_in[0]
 										offset++
 										available_in--
@@ -804,7 +804,7 @@ def main (args: array of string): int
 				retval = 1
 				fin = null
 				continue
-		var error = decompress (fin, fout)
+		var error = decompress (fin, to_stdout ? fout : bstdout)
 		if error != 0 do retval = 1
 		if not to_stdout
 			fin = null
@@ -852,7 +852,7 @@ def main (args: array of string): int
 				FileUtils.remove (output_file)
 				retval = 1
 				continue
-		var error = compress (fin, fout, quality)
+		var error = compress (fin, to_stdout ? fout : bstdout, quality)
 		if error != 0 do retval = 1
 		if not to_stdout
 			fin = null
