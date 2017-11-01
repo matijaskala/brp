@@ -804,7 +804,7 @@ def main (args: array of string): int
 				retval = 1
 				fin = null
 				continue
-		var error = decompress (fin, to_stdout ? fout : bstdout)
+		var error = decompress (fin, to_stdout ? bstdout : fout)
 		if error != 0 do retval = 1
 		if not to_stdout
 			fin = null
@@ -852,7 +852,7 @@ def main (args: array of string): int
 				FileUtils.remove (output_file)
 				retval = 1
 				continue
-		var error = compress (fin, to_stdout ? fout : bstdout, quality)
+		var error = compress (fin, to_stdout ? bstdout : fout, quality)
 		if error != 0 do retval = 1
 		if not to_stdout
 			fin = null
