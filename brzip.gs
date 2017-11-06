@@ -627,7 +627,8 @@ def decompress (fin: FileStream, fout: FileStream): int
 							prev_datalen = datalen
 							decoder = new Decoder ()
 					else
-						next_in = input_buffer
+						stderr.printf ("File format not recognized\n")
+						return 1
 			when Decoder.Result.NEEDS_MORE_INPUT
 				if fin.eof () do return 2
 				available_in = fin.read (input_buffer)
