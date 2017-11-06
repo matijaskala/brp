@@ -400,7 +400,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									return 1
 							while not fin.eof ()
 								if next_in[0] != 0
-									stderr.printf ("Corrupt input: %m\n")
+									stderr.printf ("Corrupt input\n")
 									return 1
 								available_in--
 								next_in++
@@ -410,6 +410,9 @@ def decompress (fin: FileStream, fout: FileStream): int
 									if fin.error () != 0
 										stderr.printf ("Failed to read input: %m\n")
 										return 1
+							if available_in != 0 do for var i = 0 to (available_in - 1) do if next_in[i] != 0
+								stderr.printf ("Corrupt input\n")
+								return 1
 							break_loop = true
 						else if (mask & 040) != 0
 							stderr.printf ("Corrupt trailer\n")
