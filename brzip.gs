@@ -34,8 +34,8 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32): int
 		is_eof = false
 		compress_failed = true
 		encoder = new Encoder ()
-	datalen: size_t = 0
-	offset: size_t = 0
+	datalen: int64 = 0
+	offset: int64 = 0
 	check_type: short = 3
 	available_in: size_t = 0
 	available_out: size_t = output_buffer.length
@@ -113,9 +113,9 @@ def decompress (fin: FileStream, fout: FileStream): int
 	if decoder == null
 		stderr.printf ("Failed to decompress data\n")
 		return 1
-	datalen: size_t = 0
-	offset: size_t = -1
-	prev_datalen: size_t = 0
+	datalen: int64 = 0
+	offset: int64 = -1
+	prev_datalen: int64 = 0
 	check_type: short = -1
 	available_in: size_t = 0
 	available_out: size_t = output_buffer.length
