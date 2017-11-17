@@ -52,8 +52,20 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32, ref offset: in
 					xxh64state.reset ()
 			compress_failed = false
 			encoder.setParameter (Encoder.Parameter.QUALITY, quality)
-			fout.putc (((0x34cb00 >> ((check_type ^ (check_type >> 4)) & 0xf)) & 0x80) | check_type)
-			offset = 1
+			var content_mask = check_type
+			if offset > 0
+				content_mask |= 0x10
+			fout.putc (((0x34cb00 >> ((content_mask ^ (content_mask >> 4)) & 0xf)) & 0x80) | content_mask)
+			if offset > 0
+				var i = 2
+				while offset > 0x7f
+					fout.putc ((int8)offset & 0x7f)
+					offset >>= 7
+					i++
+				fout.putc ((int8)offset | 0x80)
+				offset = i
+			else
+				offset = 1
 			do
 				if block_len >= 1 << 22 and not is_eof
 					is_eof = true
