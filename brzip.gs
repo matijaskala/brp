@@ -687,7 +687,7 @@ def main (args: array of string): int
 	var bstdin = FileStream.fdopen (0, "rb")
 	var bstdout = FileStream.fdopen (1, "wb")
 	var
-		quality = Encoder.DEFAULT_QUALITY
+		quality = 9
 		opts_end = false
 		force = false
 		decompressing = false
@@ -697,12 +697,16 @@ def main (args: array of string): int
 		keep = false
 		need_help = false
 		retval = 0
-	if args[0][0].tolower () == 'b' and args[0][1].tolower () == 'r'
-		if args[0][2].tolower () == 'c' and args[0][3].tolower () == 'a' and args[0][4].tolower () == 't'
+	var appname = args[0]
+	for var i = appname.length downto 0 do if appname[i] == '/'
+		appname = appname.substring (i+1)
+		break
+	if appname[0].tolower () == 'b' and appname[1].tolower () == 'r'
+		if appname[2].tolower () == 'c' and appname[3].tolower () == 'a' and appname[4].tolower () == 't'
 			to_stdout = true
 			decompressing = true
-		if args[0][2].tolower () == 'u' and args[0][3].tolower () == 'n' and args[0][4].tolower () == 'z' \
-						and args[0][5].tolower () == 'i' and args[0][6].tolower () == 'p'
+		if appname[2].tolower () == 'u' and appname[3].tolower () == 'n' and appname[4].tolower () == 'z' \
+						and appname[5].tolower () == 'i' and appname[6].tolower () == 'p'
 			decompressing = true
 	for var i = 1 to (args.length - 1) do if args[i][0] == '-' and args[i][1] != 0 and not opts_end
 		if args[i][1] == '-' do case args[i]
@@ -739,7 +743,7 @@ def main (args: array of string): int
 			return retval
 		if retval == 1 do return 1
 	else do from_stdin = false
-	quality %= Encoder.MAX_QUALITY - Encoder.MIN_QUALITY + 1
+	quality %= 12
 	stdout_offset: int64 = 0
 	stdout_datalen: int64 = 0
 	if from_stdin
