@@ -29,13 +29,11 @@ def private calculate_checksums (buffer: uint8*, len: size_t, ref xxh32: XXH32.S
 	return true
 
 [CCode (cname = "BRP_compress")]
-def compress (fin: FileStream, fout: FileStream, quality: uint32): int
+def compress (fin: FileStream, fout: FileStream, quality: uint32, ref offset: int64, ref datalen: int64): int
 	var
 		is_eof = false
 		compress_failed = true
 		encoder = new Encoder ()
-	datalen: int64 = 0
-	offset: int64 = 0
 	check_type: short = 3
 	available_in: size_t = 0
 	available_out: size_t = output_buffer.length
@@ -51,7 +49,7 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32): int
 		compress_failed = false
 		encoder.setParameter (Encoder.Parameter.QUALITY, quality)
 		fout.putc (((0x34cb00 >> ((check_type ^ (check_type >> 4)) & 0xf)) & 0x80) | check_type)
-		offset++
+		offset = 1
 		do
 			if available_in == 0 and not is_eof
 				available_in = fin.read (input_buffer)
@@ -86,17 +84,6 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32): int
 				fout.putc ((int8)xxhsum)
 				xxhsum >>= 8
 				offset++
-	if offset < 0 or datalen < 0
-		fout.putc (0x27)
-		return 0
-	fout.putc (077)
-	fout.putc ((int8)offset | 0x80)
-	while (offset >>= 7) > 0x7f do fout.putc ((int8)offset & 0x7f)
-	fout.putc ((int8)offset | 0x80)
-	fout.putc ((int8)datalen | 0x80)
-	while (datalen >>= 7) > 0x7f do fout.putc ((int8)datalen & 0x7f)
-	fout.putc ((int8)datalen | 0x80)
-	fout.putc (077)
 	return 0
 
 [CCode (cname = "BRP_decompress")]
@@ -753,29 +740,43 @@ def main (args: array of string): int
 		if retval == 1 do return 1
 	else do from_stdin = false
 	quality %= Encoder.MAX_QUALITY - Encoder.MIN_QUALITY + 1
+	stdout_offset: int64 = 0
+	stdout_datalen: int64 = 0
 	if from_stdin
 		if not decompressing do if bstdout.write (signature) == 0
 			stderr.printf ("Failed to write output: %m\n")
 			return 1
 		retval = 1
-		case decompressing ? decompress (bstdin, bstdout) : compress (bstdin, bstdout, quality)
+		case decompressing ? decompress (bstdin, bstdout) : compress (bstdin, bstdout, quality, ref stdout_offset, ref stdout_datalen)
 			when 0 do retval = 0
 			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], "(stdin)")
+		if not decompressing
+			if stdout_offset < 0 or stdout_datalen < 0
+				fout.putc (0x27)
+				return 0
+			bstdout.putc (077)
+			bstdout.putc ((int8)stdout_offset | 0x80)
+			while (stdout_offset >>= 7) > 0x7f do bstdout.putc ((int8)stdout_offset & 0x7f)
+			bstdout.putc ((int8)stdout_offset | 0x80)
+			bstdout.putc ((int8)stdout_datalen | 0x80)
+			while (stdout_datalen >>= 7) > 0x7f do bstdout.putc ((int8)stdout_datalen & 0x7f)
+			bstdout.putc ((int8)stdout_datalen | 0x80)
+			bstdout.putc (077)
 		return retval
-	if to_stdout
-		keep = true
-		if not decompressing do if bstdout.write (signature) == 0
-			stderr.printf ("Failed to write output: %m\n")
-			return 1
+	if to_stdout do keep = true
 	opts_end = false
 	st: Posix.Stat
 	Process.signal (ProcessSignal.INT, on_interrupt)
 	Process.signal (ProcessSignal.TERM, on_interrupt)
+	var has_stdout = false
 	for var i = 1 to (args.length - 1) do if args[i] == "-"
-		if not decompressing do if bstdout.write (signature) == 0
-			stderr.printf ("Failed to write output: %m\n")
-			return 1
-		var error = decompressing ? decompress (bstdin, bstdout) : compress (bstdin, bstdout, quality)
+		has_stdout = true
+		break
+	if not decompressing and (has_stdout or to_stdout) and bstdout.write (signature) == 0
+		stderr.printf ("Failed to write output: %m\n")
+		return 1
+	for var i = 1 to (args.length - 1) do if args[i] == "-"
+		var error = decompressing ? decompress (bstdin, bstdout) : compress (bstdin, bstdout, quality, ref stdout_offset, ref stdout_datalen)
 		if error != 0 do retval = 1
 		case error
 			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], "(stdin)")
@@ -856,9 +857,22 @@ def main (args: array of string): int
 				FileUtils.remove (output_file)
 				retval = 1
 				continue
-		var error = compress (fin, to_stdout ? bstdout : fout, quality)
+		offset: int64 = 0
+		datalen: int64 = 0
+		var error = compress (fin, to_stdout ? bstdout : fout, quality, ref to_stdout ? stdout_offset : offset, ref to_stdout ? stdout_datalen : datalen)
 		if error != 0 do retval = 1
 		if not to_stdout
+			if offset < 0 or datalen < 0
+				fout.putc (0x27)
+				return 0
+			fout.putc (077)
+			fout.putc ((int8)offset | 0x80)
+			while (offset >>= 7) > 0x7f do fout.putc ((int8)offset & 0x7f)
+			fout.putc ((int8)offset | 0x80)
+			fout.putc ((int8)datalen | 0x80)
+			while (datalen >>= 7) > 0x7f do fout.putc ((int8)datalen & 0x7f)
+			fout.putc ((int8)datalen | 0x80)
+			fout.putc (077)
 			fin = null
 			fout = null
 			var times = UTimBuf ()
@@ -874,4 +888,16 @@ def main (args: array of string): int
 			output_file = null
 		case error
 			when 0 do if not keep do FileUtils.remove (args[i])
+	if not decompressing and (has_stdout or to_stdout)
+		if stdout_offset < 0 or stdout_datalen < 0
+			bstdout.putc (0x27)
+			return 0
+		bstdout.putc (077)
+		bstdout.putc ((int8)stdout_offset | 0x80)
+		while (stdout_offset >>= 7) > 0x7f do bstdout.putc ((int8)stdout_offset & 0x7f)
+		bstdout.putc ((int8)stdout_offset | 0x80)
+		bstdout.putc ((int8)stdout_datalen | 0x80)
+		while (stdout_datalen >>= 7) > 0x7f do bstdout.putc ((int8)stdout_datalen & 0x7f)
+		bstdout.putc ((int8)stdout_datalen | 0x80)
+		bstdout.putc (077)
 	return retval
