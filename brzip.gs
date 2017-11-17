@@ -30,60 +30,68 @@ def private calculate_checksums (buffer: uint8*, len: size_t, ref xxh32: XXH32.S
 
 [CCode (cname = "BRP_compress")]
 def compress (fin: FileStream, fout: FileStream, quality: uint32, ref offset: int64, ref datalen: int64): int
-	var
-		is_eof = false
-		compress_failed = true
-		encoder = new Encoder ()
-	check_type: short = 3
-	available_in: size_t = 0
-	available_out: size_t = output_buffer.length
-	next_in: uint8* = null
-	next_out: uint8* = output_buffer
-	xxh32state: XXH32.State = null
-	xxh64state: XXH64.State = null
-	if encoder != null
+	var continue_compressing = true
+	while continue_compressing
+		var
+			is_eof = false
+			compress_failed = true
+			encoder = new Encoder ()
+		continue_compressing = false
+		block_len: int64 = 0
+		check_type: short = 3
+		available_in: size_t = 0
+		available_out: size_t = output_buffer.length
+		next_in: uint8* = null
+		next_out: uint8* = output_buffer
+		xxh32state: XXH32.State = null
+		xxh64state: XXH64.State = null
+		if encoder != null
+			case check_type
+				when 3
+					xxh64state = new XXH64.State ()
+					xxh64state.reset ()
+			compress_failed = false
+			encoder.setParameter (Encoder.Parameter.QUALITY, quality)
+			fout.putc (((0x34cb00 >> ((check_type ^ (check_type >> 4)) & 0xf)) & 0x80) | check_type)
+			offset = 1
+			do
+				if block_len >= 1 << 22 and not is_eof
+					is_eof = true
+					continue_compressing = true
+				if available_in == 0 and not is_eof
+					available_in = fin.read (input_buffer)
+					next_in = input_buffer
+					if fin.error () != 0
+						stderr.printf ("Failed to read input: %m\n")
+						return 1
+					is_eof = fin.eof ()
+					datalen += available_in
+					block_len += available_in
+					case check_type
+						when 3 do xxh64state.update (next_in, available_in)
+				if not encoder.compressStream (is_eof ? Encoder.Operation.FINISH : Encoder.Operation.PROCESS, ref available_in, ref next_in, ref available_out, ref next_out, null)
+					compress_failed = true
+					break
+				if available_out != output_buffer.length
+					output: unowned array of uint8 = output_buffer
+					output.length -= (int)available_out
+					if fout.write (output) == 0
+						stderr.printf ("Failed to write output: %m\n")
+						return 1
+					available_out = output_buffer.length
+					next_out = output_buffer
+					offset += output.length
+			while not encoder.isFinished ()
+		if compress_failed
+			stderr.printf ("Failed to compress data\n")
+			return 1
 		case check_type
-			when 3
-				xxh64state = new XXH64.State ()
-				xxh64state.reset ()
-		compress_failed = false
-		encoder.setParameter (Encoder.Parameter.QUALITY, quality)
-		fout.putc (((0x34cb00 >> ((check_type ^ (check_type >> 4)) & 0xf)) & 0x80) | check_type)
-		offset = 1
-		do
-			if available_in == 0 and not is_eof
-				available_in = fin.read (input_buffer)
-				next_in = input_buffer
-				if fin.error () != 0
-					stderr.printf ("Failed to read input: %m\n")
-					return 1
-				is_eof = fin.eof ()
-				datalen += available_in
-				case check_type
-					when 3 do xxh64state.update (next_in, available_in)
-			if not encoder.compressStream (is_eof ? Encoder.Operation.FINISH : Encoder.Operation.PROCESS, ref available_in, ref next_in, ref available_out, ref next_out, null)
-				compress_failed = true
-				break
-			if available_out != output_buffer.length
-				output: unowned array of uint8 = output_buffer
-				output.length -= (int)available_out
-				if fout.write (output) == 0
-					stderr.printf ("Failed to write output: %m\n")
-					return 1
-				available_out = output_buffer.length
-				next_out = output_buffer
-				offset += output.length
-		while not encoder.isFinished ()
-	if compress_failed
-		stderr.printf ("Failed to compress data\n")
-		return 1
-	case check_type
-		when 0,1,2,3
-			var xxhsum = check_type == 3 ? xxh64state.digest () : xxh32state.digest ()
-			for var i = 0 to ((1 << check_type) - 1)
-				fout.putc ((int8)xxhsum)
-				xxhsum >>= 8
-				offset++
+			when 0,1,2,3
+				var xxhsum = check_type == 3 ? xxh64state.digest () : xxh32state.digest ()
+				for var i = 0 to ((1 << check_type) - 1)
+					fout.putc ((int8)xxhsum)
+					xxhsum >>= 8
+					offset++
 	return 0
 
 [CCode (cname = "BRP_decompress")]
@@ -863,7 +871,7 @@ def main (args: array of string): int
 				continue
 		offset: int64 = 0
 		datalen: int64 = 0
-		var error = compress (fin, to_stdout ? bstdout : fout, quality, ref to_stdout ? stdout_offset : offset, ref to_stdout ? stdout_datalen : datalen)
+		var error = to_stdout ? compress (fin, bstdout, quality, ref stdout_offset, ref stdout_datalen) : compress (fin, fout, quality, ref offset, ref datalen)
 		if error != 0 do retval = 1
 		if not to_stdout
 			if offset < 0 or datalen < 0
