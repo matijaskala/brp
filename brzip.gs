@@ -29,7 +29,7 @@ def private calculate_checksums (buffer: uint8*, len: size_t, ref xxh32: XXH32.S
 	return true
 
 [CCode (cname = "BRP_compress")]
-def compress (fin: FileStream, fout: FileStream, quality: uint32, ref offset: int64, ref datalen: int64): int
+def compress (fin: FileStream, fout: FileStream, quality: uint32, ref offset: uint64, ref datalen: uint64): int
 	var continue_compressing = true
 	while continue_compressing
 		var
@@ -78,6 +78,7 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32, ref offset: in
 						return 1
 					is_eof = fin.eof ()
 					datalen += available_in
+					if datalen < available_in do datalen = -1
 					block_len += available_in
 					case check_type
 						when 3 do xxh64state.update (next_in, available_in)
@@ -93,6 +94,7 @@ def compress (fin: FileStream, fout: FileStream, quality: uint32, ref offset: in
 					available_out = output_buffer.length
 					next_out = output_buffer
 					offset += output.length
+					if offset < output.length do offset = -1
 			while not encoder.isFinished ()
 		if compress_failed
 			stderr.printf ("Failed to compress data\n")
@@ -185,7 +187,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 									stderr.printf ("Corrupt input\n")
 									return 1
 								num: uint64 = next_in[0] & 0x7f
-								for var i = 1 to 5
+								for var i = 1 to 10
 									offset++
 									available_in--
 									next_in++
@@ -196,7 +198,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 										if fin.error () != 0
 											stderr.printf ("Failed to read input: %m\n")
 											return 1
-									if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+									if i > 9 or i == 9 and (next_in[0] & 0xf0) != 0x80
 										stderr.printf ("Corrupt input\n")
 										return 1
 									num |= ((uint64)next_in[0] & 0x7f) << (7*i)
@@ -303,7 +305,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 										stderr.printf ("Corrupt trailer\n")
 										return 1
 									num: uint64 = next_in[0] & 0x7f
-									for var i = 1 to 5
+									for var i = 1 to 10
 										available_in--
 										next_in++
 										if available_in == 0
@@ -313,7 +315,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 											if fin.error () != 0
 												stderr.printf ("Failed to read input: %m\n")
 												return 1
-										if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+										if i > 9 or i == 9 and (next_in[0] & 0xf0) != 0x80
 											stderr.printf ("Corrupt trailer\n")
 											return 1
 										num |= ((uint64)next_in[0] & 0x7f) << (7*i)
@@ -335,7 +337,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 										stderr.printf ("Corrupt trailer\n")
 										return 1
 									num: uint64 = next_in[0] & 0x7f
-									for var i = 1 to 5
+									for var i = 1 to 10
 										available_in--
 										next_in++
 										if available_in == 0
@@ -345,7 +347,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 											if fin.error () != 0
 												stderr.printf ("Failed to read input: %m\n")
 												return 1
-										if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+										if i > 9 or i == 9 and (next_in[0] & 0xf0) != 0x80
 											stderr.printf ("Corrupt trailer\n")
 											return 1
 										num |= ((uint64)next_in[0] & 0x7f) << (7*i)
@@ -443,7 +445,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 							hasdatalen = (mask & 8) == 8
 							if (mask & 0x10) == 0x10
 								num: uint64 = 0
-								for var i = 0 to 5
+								for var i = 0 to 10
 									num |= ((uint64)next_in[0] & 0x7f) << (7*i)
 									var prev = next_in[0]
 									offset++
@@ -457,7 +459,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 											stderr.printf ("Failed to read input: %m\n")
 											return 1
 									if (prev & 0x80) != 0 do break
-									if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+									if i > 9 or i == 9 and (next_in[0] & 0xf0) != 0x80
 										stderr.printf ("Corrupt header\n")
 										return 1
 								if num != cur_offset
@@ -535,7 +537,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 											return 1
 								if (mask & 2) != 0
 									num: uint64 = 0
-									for var i = 0 to 5
+									for var i = 0 to 4
 										num |= ((uint64)next_in[0] & 0x7f) << (7*i)
 										var prev = next_in[0]
 										offset++
@@ -549,7 +551,7 @@ def decompress (fin: FileStream, fout: FileStream): int
 												stderr.printf ("Failed to read input: %m\n")
 												return 1
 										if (prev & 0x80) != 0 do break
-										if i > 4 or i == 4 and (next_in[0] & 0xf0) != 0x80
+										if i > 3 or i == 3 and (next_in[0] & 0xf0) != 0x80
 											stderr.printf ("Corrupt metadata\n")
 											return 1
 									var filename = new array of char[num + 1]
@@ -764,8 +766,8 @@ def main (args: array of string): int
 		if retval == 1 do return 1
 	else do from_stdin = false
 	quality %= 12
-	stdout_offset: int64 = 0
-	stdout_datalen: int64 = 0
+	stdout_offset: uint64 = 0
+	stdout_datalen: uint64 = 0
 	if from_stdin
 		if not decompressing do if bstdout.write (signature) == 0
 			stderr.printf ("Failed to write output: %m\n")
@@ -775,7 +777,7 @@ def main (args: array of string): int
 			when 0 do retval = 0
 			when 2 do stderr.printf ("%s: %s: Unexpected end of input\n", args[0], "(stdin)")
 		if not decompressing
-			if stdout_offset < 0 or stdout_datalen < 0
+			if stdout_offset + 1 == 0 or stdout_datalen + 1 == 0
 				fout.putc (0x27)
 				return 0
 			bstdout.putc (077)
@@ -881,12 +883,12 @@ def main (args: array of string): int
 				FileUtils.remove (output_file)
 				retval = 1
 				continue
-		offset: int64 = 0
-		datalen: int64 = 0
+		offset: uint64 = 0
+		datalen: uint64 = 0
 		var error = to_stdout ? compress (fin, bstdout, quality, ref stdout_offset, ref stdout_datalen) : compress (fin, fout, quality, ref offset, ref datalen)
 		if error != 0 do retval = 1
 		if not to_stdout
-			if offset < 0 or datalen < 0
+			if offset + 1 == 0 or datalen + 1 == 0
 				fout.putc (0x27)
 				return 0
 			fout.putc (077)
@@ -913,7 +915,7 @@ def main (args: array of string): int
 		case error
 			when 0 do if not keep do FileUtils.remove (args[i])
 	if not decompressing and (has_stdout or to_stdout)
-		if stdout_offset < 0 or stdout_datalen < 0
+		if stdout_offset + 1 == 0 or stdout_datalen + 1 == 0
 			bstdout.putc (0x27)
 			return 0
 		bstdout.putc (077)
