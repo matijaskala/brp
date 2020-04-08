@@ -146,7 +146,8 @@ def decompress (fin: FileStream, fout: FileStream): int
 					else if next_in == null and available_in > 4 and Memory.cmp (input_buffer, "\xce\xb2\xcf\x81", 4) == 0
 						brv3 = true
 						available_in -= 4
-						next_in = input_buffer + 4
+						next_in = input_buffer
+						next_in += 4
 						continue
 					else if brv3
 						if available_in == 0
@@ -267,7 +268,8 @@ def decompress (fin: FileStream, fout: FileStream): int
 											return 1
 										Memory.copy ((uint8*)buffer2 + available_in_prev, input_buffer, 32 - available_in_prev)
 										available_in -= 32 - available_in_prev
-										next_in = input_buffer + (32 - available_in_prev)
+										next_in = input_buffer
+										next_in += 32 - available_in_prev
 									else
 										Memory.copy (buffer2, next_in, 32)
 									if Memory.cmp (buffer1, buffer2, 32) != 0
