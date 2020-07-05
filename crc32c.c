@@ -13,7 +13,6 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 
 typedef uint32_t u32;
 

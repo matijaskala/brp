@@ -681,7 +681,6 @@ def decompress (fin: FileStream, fout: FileStream): int
 
 [CCode (cname = "crc32c_le")]
 def extern crc32c (crc: uint32, buf: uchar*, len: size_t): uint32
-def extern g_lstat (filename: string, out buf: Posix.Stat): int
 
 fin: FileStream
 fout: FileStream
@@ -722,7 +721,7 @@ def main (args: array of string): int
 		need_help = false
 		retval = 0
 	var appname = args[0]
-	for var i = appname.length downto 0 do if appname[i] == '/'
+	for var i = appname.length downto 0 do if appname[i] == '/' or appname[i] == '\\'
 		appname = appname.substring (i+1)
 		break
 	if appname[0].tolower () == 'b' and appname[1].tolower () == 'r'
@@ -811,7 +810,7 @@ def main (args: array of string): int
 	else if args[i][0] == '-' and not opts_end
 		if args[i] == "--" do opts_end = true
 	else if decompressing
-		if g_lstat (args[i], out st) < 0
+		if to_stdout ? g_stat (args[i], out st) < 0 : g_lstat (args[i], out st) < 0
 			stderr.printf ("%s: %s: %m\n", args[0], args[i])
 			retval = 1
 			continue

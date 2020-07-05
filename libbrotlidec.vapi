@@ -11,6 +11,6 @@ namespace Brotli {
 		[CCode (cname = "BrotliDecoderCreateInstance")]
 		public Decoder (void* alloc_func = null, void* free_func = null, void* opaque = null);
 		[CCode (cname = "BrotliDecoderDecompressStream")]
-		public Result decompressStream (ref size_t available_in, [CCode (ctype = "const guint8**")] ref uint8* next_in, ref size_t available_out, ref uint8* next_out, out size_t total_out);
+		public Result decompressStream (ref size_t available_in, [CCode (type = "const guint8**")] ref uint8* next_in, ref size_t available_out, ref uint8* next_out, out size_t total_out);
 	}
 }
