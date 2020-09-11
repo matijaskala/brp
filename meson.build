@@ -17,12 +17,7 @@ stat_vapi = meson.get_compiler('vala').find_library('stat', dirs: meson.current_
 
 posix_dep = meson.get_compiler('vala').find_library('posix')
 
-if get_option('btrfs')
-	btrfs_dep = meson.get_compiler('c').find_library('btrfs')
-	brzip = executable('brzip', 'brzip.gs', dependencies: [glib_dep, gobject_dep, brotli_dep, xxhash_dep, stat_vapi, posix_dep, btrfs_dep], install: true)
-else
-	brzip = executable('brzip', 'brzip.gs', 'crc32c.c', dependencies: [glib_dep, gobject_dep, brotli_dep, xxhash_dep, stat_vapi, posix_dep], install: true)
-endif
+brzip = executable('brzip', 'brzip.gs', 'crc32c.c', dependencies: [glib_dep, gobject_dep, brotli_dep, xxhash_dep, stat_vapi, posix_dep], install: true)
 
 install_man('brzip.1')
 
