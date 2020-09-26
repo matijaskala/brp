@@ -174,21 +174,9 @@ def decompress (fin: FileStream, fout: FileStream): int
 								available_out = output_buffer.length
 								next_out = output_buffer
 							if hasdatalen
-								offset++
-								available_in--
-								next_in++
-								if available_in == 0
-									available_in = fin.read (input_buffer)
-									next_in = input_buffer
-									if fin.eof () do return 2
-									if fin.error () != 0
-										stderr.printf ("Failed to read input: %m\n")
-										return 1
-								if (next_in[0] & 0x80) != 0
-									stderr.printf ("Corrupt input\n")
-									return 1
 								num: uint64 = next_in[0] & 0x7f
 								for var i = 1 to 10
+									if (next_in[0] & 0x80) != 0 do break
 									offset++
 									available_in--
 									next_in++
@@ -203,10 +191,19 @@ def decompress (fin: FileStream, fout: FileStream): int
 										stderr.printf ("Corrupt input\n")
 										return 1
 									num |= ((uint64)next_in[0] & 0x7f) << (7*i)
-									if (next_in[0] & 0x80) != 0 do break
 								if num != datalen - prev_datalen
 									stderr.printf ("Incorrect data length\n")
 									return 1
+								offset++
+								available_in--
+								next_in++
+								if available_in == 0
+									available_in = fin.read (input_buffer)
+									next_in = input_buffer
+									if fin.eof () do return 2
+									if fin.error () != 0
+										stderr.printf ("Failed to read input: %m\n")
+										return 1
 							case check_type
 								when 0,1,2,3
 									var digest = new array of uint8[1 << check_type]
